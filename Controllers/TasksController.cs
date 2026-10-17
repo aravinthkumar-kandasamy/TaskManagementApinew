@@ -1,6 +1,6 @@
 ﻿
-using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Mvc;
 using TaskManagementApi.Models;
 
 namespace TaskManagementApi.Controllers;
@@ -12,10 +12,17 @@ public class TasksController : ControllerBase
     private static readonly ConcurrentDictionary<Guid, TaskItem> _tasks = new();
 
     // GET: api/tasks?page=1&pageSize=10
+    // GET: api/tasks?isCompleted=true
+    // GET: api/tasks?search=assessment
+    // GET: api/tasks?sortBy=title&sortOrder=asc
     [HttpGet]
     public ActionResult<PagedResponse<TaskItem>> GetAll(
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10)
+        [FromQuery] int pageSize = 10,
+        [FromQuery] bool? isCompleted = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string sortBy = "createdAtUtc",
+        [FromQuery] string sortOrder = "asc")
     {
         if (page < 1)
         {
@@ -33,19 +40,96 @@ public class TasksController : ControllerBase
             });
         }
 
-        var allTasks = _tasks.Values
-            .OrderBy(task => task.CreatedAtUtc)
-            .ThenBy(task => task.Id)
-            .ToList();
+        if (string.IsNullOrWhiteSpace(sortBy))
+        {
+            return BadRequest(new
+            {
+                message = "Sort field is required."
+            });
+        }
 
-        var totalCount = allTasks.Count;
+        if (!string.Equals(sortBy, "title",
+                StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(sortBy, "createdAtUtc",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new
+            {
+                message = "Supported sort fields are title and createdAtUtc."
+            });
+        }
 
-        var items = allTasks
-            .Skip((int)Math.Min(((long)page - 1) * pageSize, int.MaxValue))
+        if (!string.Equals(sortOrder, "asc",
+                StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(sortOrder, "desc",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new
+            {
+                message = "Sort order must be asc or desc."
+            });
+        }
+
+        // 1. Start with all tasks.
+        IEnumerable<TaskItem> query = _tasks.Values;
+
+        // 2. Filter by completion status.
+        if (isCompleted.HasValue)
+        {
+            query = query.Where(task =>
+                task.IsCompleted == isCompleted.Value);
+        }
+
+        // 3. Search task titles, ignoring letter case.
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(task =>
+                task.Title.Contains(
+                    search.Trim(),
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
+        // 4. Sort before pagination.
+        var descending = string.Equals(
+            sortOrder,
+            "desc",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (string.Equals(sortBy, "title",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            query = descending
+                ? query.OrderByDescending(task => task.Title,
+                    StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(task => task.Id)
+                : query.OrderBy(task => task.Title,
+                    StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(task => task.Id);
+        }
+        else
+        {
+            query = descending
+                ? query.OrderByDescending(task => task.CreatedAtUtc)
+                    .ThenBy(task => task.Id)
+                : query.OrderBy(task => task.CreatedAtUtc)
+                    .ThenBy(task => task.Id);
+        }
+
+        // 5. Count filtered records before pagination.
+        var filteredTasks = query.ToList();
+        var totalCount = filteredTasks.Count;
+
+        // Avoid integer overflow for very large page numbers.
+        var offset = (int)Math.Min(
+            ((long)page - 1) * pageSize,
+            int.MaxValue);
+
+        var items = filteredTasks
+            .Skip(offset)
             .Take(pageSize)
             .ToList();
 
-        var response = new PagedResponse<TaskItem>
+        return Ok(new PagedResponse<TaskItem>
         {
             Items = items,
             Page = page,
@@ -53,9 +137,7 @@ public class TasksController : ControllerBase
             TotalCount = totalCount,
             TotalPages = (int)Math.Ceiling(
                 totalCount / (double)pageSize)
-        };
-
-        return Ok(response);
+        });
     }
 
     // GET: api/tasks/{id}
@@ -77,11 +159,6 @@ public class TasksController : ControllerBase
     [HttpPost]
     public ActionResult<TaskItem> Create([FromBody] TaskItem task)
     {
-        if (!ModelState.IsValid)
-        {
-            return ValidationProblem(ModelState);
-        }
-
         task.Id = Guid.NewGuid();
         task.CreatedAtUtc = DateTime.UtcNow;
 
@@ -104,11 +181,6 @@ public class TasksController : ControllerBase
         Guid id,
         [FromBody] TaskItem updatedTask)
     {
-        if (!ModelState.IsValid)
-        {
-            return ValidationProblem(ModelState);
-        }
-
         if (!_tasks.TryGetValue(id, out var existingTask))
         {
             return NotFound(new
