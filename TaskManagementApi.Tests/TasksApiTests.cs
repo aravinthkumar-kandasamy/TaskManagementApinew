@@ -232,4 +232,78 @@ public class TasksApiTests : IClassFixture<WebApplicationFactory<Program>>
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+
+    [Fact]
+    public async Task GetAll_FilterByCompletion_ReturnsOnlyMatchingTasks()
+    {
+        // Arrange: create two tasks with the same title
+        // but different completion statuses.
+        const string uniqueTitle = "PR4-completion-filter-test";
+
+        var completedTask = new TaskItem
+        {
+            Title = uniqueTitle,
+            IsCompleted = true
+        };
+
+        var incompleteTask = new TaskItem
+        {
+            Title = uniqueTitle,
+            IsCompleted = false
+        };
+
+        var completedResponse = await _client.PostAsJsonAsync(
+            "/api/tasks", completedTask);
+
+        var incompleteResponse = await _client.PostAsJsonAsync(
+            "/api/tasks", incompleteTask);
+
+        Assert.Equal(
+            HttpStatusCode.Created, completedResponse.StatusCode);
+
+        Assert.Equal(
+            HttpStatusCode.Created, incompleteResponse.StatusCode);
+
+        // Act: request completed tasks.
+        var completedFilterResponse = await _client.GetAsync(
+            $"/api/tasks?isCompleted=true&search={uniqueTitle}");
+
+        Assert.Equal(
+            HttpStatusCode.OK, completedFilterResponse.StatusCode);
+
+        var completedResult =
+            await completedFilterResponse.Content
+                .ReadFromJsonAsync<PagedResponse<TaskItem>>();
+
+        // Assert: only the completed task is returned.
+        Assert.NotNull(completedResult);
+        Assert.Single(completedResult.Items);
+        Assert.All(completedResult.Items, task =>
+        {
+            Assert.Equal(uniqueTitle, task.Title);
+            Assert.True(task.IsCompleted);
+        });
+
+        // Act: request incomplete tasks.
+        var incompleteFilterResponse = await _client.GetAsync(
+            $"/api/tasks?isCompleted=false&search={uniqueTitle}");
+
+        Assert.Equal(
+            HttpStatusCode.OK, incompleteFilterResponse.StatusCode);
+
+        var incompleteResult =
+            await incompleteFilterResponse.Content
+                .ReadFromJsonAsync<PagedResponse<TaskItem>>();
+
+        // Assert: only the incomplete task is returned.
+        Assert.NotNull(incompleteResult);
+        Assert.Single(incompleteResult.Items);
+        Assert.All(incompleteResult.Items, task =>
+        {
+            Assert.Equal(uniqueTitle, task.Title);
+            Assert.False(task.IsCompleted);
+        });
+    }
+
 }
