@@ -170,4 +170,120 @@ public class TasksApiTests : IClassFixture<WebApplicationFactory<Program>>
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+
+    [Fact]
+    public async Task GetAll_FilterByCompletion_ReturnsMatchingTasks()
+    {
+        var task = new TaskItem
+        {
+            Title = "PR4-filter-completed-unique",
+            IsCompleted = true
+        };
+
+        var createResponse = await _client.PostAsJsonAsync(
+            "/api/tasks", task);
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+
+        var response = await _client.GetAsync(
+            "/api/tasks?isCompleted=true&search=PR4-filter-completed-unique");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result =
+            await response.Content.ReadFromJsonAsync<PagedResponse<TaskItem>>();
+
+        Assert.NotNull(result);
+        Assert.NotEmpty(result.Items);
+        Assert.All(result.Items, item =>
+        {
+            Assert.True(item.IsCompleted);
+            Assert.Contains(
+                "PR4-filter-completed-unique",
+                item.Title,
+                StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public async Task GetAll_SearchByTitle_ReturnsMatchingTasks()
+    {
+        var task = new TaskItem
+        {
+            Title = "PR4-search-unique-task"
+        };
+
+        var createResponse = await _client.PostAsJsonAsync(
+            "/api/tasks", task);
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+
+        var response = await _client.GetAsync(
+            "/api/tasks?search=PR4-search-unique-task");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result =
+            await response.Content.ReadFromJsonAsync<PagedResponse<TaskItem>>();
+
+        Assert.NotNull(result);
+        Assert.Contains(result.Items, item =>
+            item.Title == "PR4-search-unique-task");
+    }
+
+    [Fact]
+    public async Task GetAll_SortByTitleAscending_ReturnsSortedTasks()
+    {
+        var titles = new[]
+        {
+        "PR4-sort-unique-Beta",
+        "PR4-sort-unique-Alpha"
+    };
+
+        foreach (var title in titles)
+        {
+            var response = await _client.PostAsJsonAsync(
+                "/api/tasks",
+                new TaskItem { Title = title });
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        }
+
+        var response = await _client.GetAsync(
+            "/api/tasks?search=PR4-sort-unique-&sortBy=title&sortOrder=asc");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result =
+            await response.Content.ReadFromJsonAsync<PagedResponse<TaskItem>>();
+
+        Assert.NotNull(result);
+
+        var actualTitles = result.Items
+            .Select(item => item.Title)
+            .ToList();
+
+        Assert.Equal(
+            new[]
+            {
+            "PR4-sort-unique-Alpha",
+            "PR4-sort-unique-Beta"
+            },
+            actualTitles);
+    }
+
+    [Theory]
+    [InlineData("invalid", "asc")]
+    [InlineData("title", "invalid")]
+    [InlineData("id", "asc")]
+    public async Task GetAll_WithInvalidSorting_ReturnsBadRequest(
+        string sortBy,
+        string sortOrder)
+    {
+        var response = await _client.GetAsync(
+            $"/api/tasks?sortBy={sortBy}&sortOrder={sortOrder}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }
