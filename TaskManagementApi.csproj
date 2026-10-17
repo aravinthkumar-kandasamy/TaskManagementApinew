@@ -5,9 +5,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
-
-  <ItemGroup>
+	<ItemGroup>
+		<Compile Remove="TaskManagementApi.Tests/**/*.cs" />
+		<Content Remove="TaskManagementApi.Tests/**" />
+		<None Remove="TaskManagementApi.Tests/**" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
   </ItemGroup>
-
-</Project>
+</Project> 
